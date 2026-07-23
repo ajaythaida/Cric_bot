@@ -27,6 +27,23 @@ export interface SportsDbTeam {
   website?: string;
 }
 
+export interface SportsDbEvent {
+  id: string;
+  name: string;
+  sport?: string;
+  league?: string;
+  season?: string;
+  date?: string;
+  time?: string;
+  status?: string;
+  homeTeam?: string;
+  awayTeam?: string;
+  homeScore?: string;
+  awayScore?: string;
+  venue?: string;
+  country?: string;
+}
+
 const BUILT_IN_TEAM_PROFILES: SportsDbTeam[] = [
   {
     id: "builtin-csk",
@@ -72,7 +89,9 @@ const BUILT_IN_TEAM_PROFILES: SportsDbTeam[] = [
 type SportsDbEnvelope<T> = {
   teams?: T[];
   player?: unknown[];
-  event?: unknown[];
+  events?: T[];
+  event?: T[];
+  results?: T[];
 };
 
 function apiKey(): string {
@@ -84,7 +103,11 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function asString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
+  if (typeof value === "string") {
+    return value.trim() || undefined;
+  }
+
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : undefined;
 }
 
 function normalizeTeam(team: unknown): SportsDbTeam {
@@ -103,6 +126,26 @@ function normalizeTeam(team: unknown): SportsDbTeam {
     description: asString(item.strDescriptionEN),
     badge: asString(item.strBadge),
     website: asString(item.strWebsite)
+  };
+}
+
+function normalizeEvent(event: unknown): SportsDbEvent {
+  const item = asRecord(event);
+  return {
+    id: asString(item.idEvent) ?? "unknown-event",
+    name: asString(item.strEvent) ?? "Unknown match",
+    sport: asString(item.strSport),
+    league: asString(item.strLeague),
+    season: asString(item.strSeason),
+    date: asString(item.dateEvent),
+    time: asString(item.strTime),
+    status: asString(item.strStatus),
+    homeTeam: asString(item.strHomeTeam),
+    awayTeam: asString(item.strAwayTeam),
+    homeScore: asString(item.intHomeScore),
+    awayScore: asString(item.intAwayScore),
+    venue: asString(item.strVenue),
+    country: asString(item.strCountry)
   };
 }
 
@@ -139,20 +182,62 @@ async function fetchSportsDb<T>(endpoint: string, params: Record<string, string>
   }
 }
 
-export async function searchTeams(teamName: string): Promise<SportsDbTeam[]> {
+export async function searchTeamsBySport(teamName: string, sport: string): Promise<SportsDbTeam[]> {
   const body = await fetchSportsDb<SportsDbEnvelope<unknown>>("searchteams.php", { t: teamName });
-  const apiTeams = (body.teams ?? []).map(normalizeTeam).filter((team) => team.sport?.toLowerCase() === "cricket");
+  const lowerSport = sport.toLowerCase();
+  const apiTeams = (body.teams ?? []).map(normalizeTeam).filter((team) => team.sport?.toLowerCase() === lowerSport);
   const lowerName = teamName.toLowerCase();
   const builtIns = BUILT_IN_TEAM_PROFILES.filter((team) => {
-    return [team.name, team.shortName, team.alternateNames]
-      .filter(Boolean)
-      .some((value) => value?.toLowerCase().includes(lowerName) || lowerName.includes(value?.toLowerCase() ?? ""));
+    return (
+      team.sport?.toLowerCase() === lowerSport &&
+      [team.name, team.shortName, team.alternateNames]
+        .filter(Boolean)
+        .some((value) => value?.toLowerCase().includes(lowerName) || lowerName.includes(value?.toLowerCase() ?? ""))
+    );
   });
 
   return [...apiTeams, ...builtIns];
 }
 
+export async function searchTeams(teamName: string): Promise<SportsDbTeam[]> {
+  return searchTeamsBySport(teamName, "Cricket");
+}
+
 export async function getTeamProfile(teamName: string): Promise<SportsDbTeam | null> {
   const teams = await searchTeams(teamName);
   return teams[0] ?? null;
+}
+
+export async function searchFootballTeams(teamName: string): Promise<SportsDbTeam[]> {
+  return searchTeamsBySport(teamName, "Soccer");
+}
+
+export async function getFootballTeamProfile(teamName: string): Promise<SportsDbTeam | null> {
+  const teams = await searchFootballTeams(teamName);
+  return teams[0] ?? null;
+}
+
+export async function getFootballMatchesByDate(date: string): Promise<SportsDbEvent[]> {
+  const body = await fetchSportsDb<SportsDbEnvelope<unknown>>("eventsday.php", { d: date, s: "Soccer" });
+  return (body.events ?? []).map(normalizeEvent);
+}
+
+export async function getFootballTeamPastMatches(teamName: string): Promise<SportsDbEvent[]> {
+  const team = await getFootballTeamProfile(teamName);
+  if (!team) {
+    return [];
+  }
+
+  const body = await fetchSportsDb<SportsDbEnvelope<unknown>>("eventslast.php", { id: team.id });
+  return (body.results ?? body.event ?? body.events ?? []).map(normalizeEvent);
+}
+
+export async function getFootballTeamNextMatches(teamName: string): Promise<SportsDbEvent[]> {
+  const team = await getFootballTeamProfile(teamName);
+  if (!team) {
+    return [];
+  }
+
+  const body = await fetchSportsDb<SportsDbEnvelope<unknown>>("eventsnext.php", { id: team.id });
+  return (body.events ?? body.event ?? []).map(normalizeEvent);
 }

@@ -1,7 +1,7 @@
 import { google } from "@ai-sdk/google";
 import { generateText } from "ai";
 import { CricketDataError, getCurrentMatches, getMatches, searchPlayers } from "@/lib/cricketData";
-import { getTeamProfile } from "@/lib/theSportsDb";
+import { getFootballMatchesByDate, getFootballTeamPastMatches, getTeamProfile } from "@/lib/theSportsDb";
 
 export const runtime = "nodejs";
 
@@ -193,11 +193,54 @@ async function checkTheSportsDb(): Promise<ApiCheck> {
   }
 }
 
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function checkFootballApis(): Promise<ApiCheck[]> {
+  const checks: ApiCheck[] = [];
+
+  try {
+    const matches = await getFootballMatchesByDate(todayIsoDate());
+    checks.push({
+      ok: true,
+      name: "TheSportsDB football matches today",
+      message: `Fetched ${matches.length} football match item(s) for today.`,
+      sample: matches.slice(0, 2)
+    });
+  } catch (error) {
+    checks.push({
+      ok: false,
+      name: "TheSportsDB football matches today",
+      message: formatError(error)
+    });
+  }
+
+  try {
+    const matches = await getFootballTeamPastMatches("Arsenal");
+    checks.push({
+      ok: true,
+      name: "TheSportsDB Arsenal past matches",
+      message: `Fetched ${matches.length} Arsenal past match item(s).`,
+      sample: matches.slice(0, 2)
+    });
+  } catch (error) {
+    checks.push({
+      ok: false,
+      name: "TheSportsDB Arsenal past matches",
+      message: formatError(error)
+    });
+  }
+
+  return checks;
+}
+
 export async function GET() {
   const cricketChecks = await checkCricketApis();
   const geminiCheck = await checkGemini();
   const sportsDbCheck = await checkTheSportsDb();
-  const checks = [...cricketChecks, geminiCheck, sportsDbCheck];
+  const footballChecks = await checkFootballApis();
+  const checks = [...cricketChecks, ...footballChecks, geminiCheck, sportsDbCheck];
 
   return Response.json({
     ok: checks.every((check) => check.ok),

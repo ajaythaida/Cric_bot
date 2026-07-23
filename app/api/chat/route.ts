@@ -11,7 +11,16 @@ import {
   searchPlayers
 } from "@/lib/cricketData";
 import { predictMatch } from "@/lib/prediction";
-import { getTeamProfile, searchTeams } from "@/lib/theSportsDb";
+import {
+  getFootballMatchesByDate,
+  getFootballTeamNextMatches,
+  getFootballTeamPastMatches,
+  getFootballTeamProfile,
+  getTeamProfile,
+  searchFootballTeams,
+  searchTeams,
+  type SportsDbEvent
+} from "@/lib/theSportsDb";
 import type { NormalizedMatch, NormalizedPlayer } from "@/types/cricket";
 
 export const runtime = "nodejs";
@@ -21,9 +30,9 @@ type ClientMessage = {
   content: string;
 };
 
-const SYSTEM_PROMPT = `You are CricBot, an AI cricket analyst. Your job is to answer cricket questions using real CricketData API data whenever possible. You can explain live scores, match schedules, player details, scorecards, squads, team form, player form, team history, and basic match predictions. Never hallucinate live scores or exact statistics. If the API does not return required data, say that the data is currently unavailable. For predictions, explain that it is an estimate based on available data and not guaranteed. Keep answers clear, student-project friendly, and useful for cricket fans.
+const SYSTEM_PROMPT = `You are SportBot AI, a student-project sports analyst for football and cricket. Your job is to answer football and cricket questions using real API data whenever possible. For cricket, use CricketData/CricAPI. For football, use TheSportsDB team and event data. You can explain live/current matches, past matches, upcoming matches, team form, player details when available, team history, comparisons, and basic match predictions. Never hallucinate live scores or exact statistics. If the API does not return required data, say that the data is currently unavailable.
 
-Use your general cricket knowledge for stable historical context, but use tools when they can provide team metadata, live matches, schedules, players, scorecards, or squads. Do not say a general team-history or comparison question is unsupported just because no live-score tool is needed.
+Use your general sports knowledge for stable historical context, but use tools when they can provide team metadata, live matches, schedules, players, scorecards, or squads. Do not say a general team-history or comparison question is unsupported just because no live-score tool is needed.
 
 Formatting rules:
 - Keep responses concise and easy to scan.
@@ -35,6 +44,7 @@ Formatting rules:
   **Venue:** ...
   **Date:** ...
 - Do not print very long raw lists.
+- For football match lists, show match, status, teams, score if available, league, venue, and date.
 - Format player search with player name, country if available, role if available, and ID.
 - Format team profiles with team name, league, country, formed year, stadium, short history, and badge URL if available.
 - For team comparisons, use a compact table or short sections: overview, history, strengths, recent API-backed matches if available, and caveat.
@@ -45,7 +55,7 @@ Formatting rules:
 const EMPTY_RESPONSE_MESSAGE =
   "I could not generate a response this time. Please check the server console and try again.";
 const FRIENDLY_MODEL_ERROR =
-  "I could not generate a cricket answer right now. Please check that your Gemini API key is valid and try again.";
+  "I could not generate a sports answer right now. Please check that your Gemini API key is valid and try again.";
 const GEMINI_MODEL = process.env.GOOGLE_GENERATIVE_AI_MODEL ?? "gemini-2.5-flash";
 
 function formatToolError(error: unknown): string {
@@ -70,6 +80,12 @@ function latestUserQuestion(messages: ClientMessage[]): string {
 
 function isRecentFormQuestion(question: string): boolean {
   return /(recent|form|last results|last matches)/i.test(question);
+}
+
+function isFootballQuestion(question: string): boolean {
+  return /(football|soccer|premier league|la liga|champions league|arsenal|chelsea|liverpool|manchester|barcelona|real madrid|psg|bayern|juventus|inter milan|ac milan)/i.test(
+    question
+  );
 }
 
 function formatMatch(match: NormalizedMatch): string {
@@ -101,6 +117,24 @@ function formatPlayer(player: NormalizedPlayer): string {
     `  Country: ${player.country ?? "Unavailable"}`,
     `  Role: ${player.role ?? "Unavailable"}`,
     `  ID: ${player.id}`
+  ].join("\n");
+}
+
+function formatFootballEvent(event: SportsDbEvent): string {
+  const score =
+    event.homeScore || event.awayScore
+      ? `${event.homeTeam ?? "Home"} ${event.homeScore ?? "-"} - ${event.awayScore ?? "-"} ${event.awayTeam ?? "Away"}`
+      : "Score not available";
+
+  return [
+    `### ${event.name}`,
+    `**Status:** ${event.status ?? "Scheduled/unknown"}`,
+    `**Teams:** ${[event.homeTeam, event.awayTeam].filter(Boolean).join(" vs ") || "Unavailable"}`,
+    `**Score:** ${score}`,
+    `**League:** ${event.league ?? "Unavailable"}`,
+    `**Venue:** ${event.venue ?? "Unavailable"}`,
+    `**Date:** ${event.date ?? "Unavailable"}`,
+    `**Match ID:** \`${event.id}\``
   ].join("\n");
 }
 
@@ -150,6 +184,53 @@ function extractTeamName(question: string): string {
     .trim();
 }
 
+function extractFootballTeamName(question: string): string {
+  const knownTeams: Record<string, string> = {
+    arsenal: "Arsenal",
+    chelsea: "Chelsea",
+    liverpool: "Liverpool",
+    "man city": "Manchester City",
+    "manchester city": "Manchester City",
+    "man united": "Manchester United",
+    "manchester united": "Manchester United",
+    barcelona: "Barcelona",
+    "real madrid": "Real Madrid",
+    psg: "Paris Saint-Germain",
+    bayern: "Bayern Munich",
+    juventus: "Juventus",
+    "inter milan": "Inter Milan",
+    "ac milan": "AC Milan"
+  };
+  const lowerQuestion = question.toLowerCase();
+  const matchedKey = Object.keys(knownTeams).find((team) => lowerQuestion.includes(team));
+
+  if (matchedKey) {
+    return knownTeams[matchedKey];
+  }
+
+  return question
+    .replace(/show|football|soccer|past|previous|recent|form|upcoming|next|matches|match|fixtures|fixture|live|today|for|of|\?/gi, "")
+    .trim();
+}
+
+function todayIsoDate(): string {
+  const dateParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: process.env.SPORTS_TIME_ZONE ?? "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  })
+    .formatToParts(new Date())
+    .reduce<Record<string, string>>((parts, part) => {
+      if (part.type !== "literal") {
+        parts[part.type] = part.value;
+      }
+      return parts;
+    }, {});
+
+  return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+}
+
 function matchMentionsTeam(match: NormalizedMatch, teamName: string): boolean {
   const lowerTeam = teamName.toLowerCase();
   return match.name.toLowerCase().includes(lowerTeam) || match.teams.some((team) => team.toLowerCase().includes(lowerTeam));
@@ -186,7 +267,7 @@ async function answerRecentFormQuestion(question: string): Promise<string> {
       "",
       "I could not find recent/current matches for this team in the CricketData API window right now.",
       "",
-      "The API available in this project does not provide a dedicated recent-form endpoint, so CricBot checks current and listed matches as a proxy. Since no matching team results were returned, I should not invent form data.",
+      "The API available in this project does not provide a dedicated recent-form endpoint, so SportBot checks current and listed matches as a proxy. Since no matching team results were returned, I should not invent form data.",
       "",
       "Try asking for:",
       "- Show current cricket matches",
@@ -201,6 +282,77 @@ async function answerRecentFormQuestion(question: string): Promise<string> {
     "The API does not provide a dedicated recent-form endpoint, so this uses recent/current CricketData matches as a form proxy.",
     "",
     matches.map(formatMatch).join("\n\n")
+  ].join("\n");
+}
+
+async function answerFootballQuestion(question: string): Promise<string> {
+  if (/(today|live|current)/i.test(question)) {
+    const matches = await getFootballMatchesByDate(todayIsoDate());
+    if (!matches.length) {
+      return [
+        "## Football matches today",
+        "",
+        "I could not find football matches for today in TheSportsDB free API window.",
+        "",
+        "For this mini project, football live coverage uses today's football events/status from TheSportsDB. Full real-time football livescores usually require a premium sports-data feed."
+      ].join("\n");
+    }
+
+    return `## Football matches today\n\n${matches.slice(0, 5).map(formatFootballEvent).join("\n\n")}`;
+  }
+
+  if (/(past|previous|recent|form|last)/i.test(question)) {
+    const teamName = extractFootballTeamName(question);
+    const matches = await getFootballTeamPastMatches(teamName);
+    if (!matches.length) {
+      return `## ${teamName || "Football team"} past matches\n\nI could not find past football matches for this team in TheSportsDB right now.`;
+    }
+
+    return `## ${teamName} past matches\n\n${matches.slice(0, 5).map(formatFootballEvent).join("\n\n")}`;
+  }
+
+  if (/(next|upcoming|schedule|fixtures)/i.test(question)) {
+    const teamName = extractFootballTeamName(question);
+    const matches = await getFootballTeamNextMatches(teamName);
+    if (!matches.length) {
+      return `## ${teamName || "Football team"} upcoming matches\n\nI could not find upcoming football matches for this team in TheSportsDB right now.`;
+    }
+
+    return `## ${teamName} upcoming matches\n\n${matches.slice(0, 5).map(formatFootballEvent).join("\n\n")}`;
+  }
+
+  if (/(profile|history|about|team)/i.test(question)) {
+    const teamName = extractFootballTeamName(question);
+    const team = await getFootballTeamProfile(teamName);
+    if (!team) {
+      return `I could not find a football team profile for ${teamName || "that team"} right now.`;
+    }
+
+    return [
+      `## ${team.name}`,
+      `**Sport:** ${team.sport ?? "Football"}`,
+      `**League:** ${team.league ?? "Unavailable"}`,
+      `**Country:** ${team.country ?? "Unavailable"}`,
+      `**Formed:** ${team.formedYear ?? "Unavailable"}`,
+      `**Stadium:** ${team.stadium ?? "Unavailable"}`,
+      team.badge ? `**Badge:** ${team.badge}` : "",
+      "",
+      team.description ? team.description.slice(0, 900) : "No team description is available from TheSportsDB."
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return [
+    "## Football support",
+    "",
+    "For the mini project, I can show football matches today, a team's past matches, upcoming fixtures, and basic team profiles.",
+    "",
+    "Try asking:",
+    "- Show football matches today",
+    "- Show Arsenal past matches",
+    "- Show Barcelona upcoming fixtures",
+    "- Explain Manchester United team history"
   ].join("\n");
 }
 
@@ -221,6 +373,10 @@ async function localCricketFallback(messages: ClientMessage[], error?: unknown):
       : "";
 
   try {
+    if (isFootballQuestion(question)) {
+      return `${errorNote}${await answerFootballQuestion(question)}`;
+    }
+
     if (isRecentFormQuestion(question)) {
       return `${errorNote}${await answerRecentFormQuestion(question)}`;
     }
@@ -310,12 +466,6 @@ async function localCricketFallback(messages: ClientMessage[], error?: unknown):
 }
 
 export async function POST(request: Request) {
-  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    return new Response("Gemini API key is not configured. Add GOOGLE_GENERATIVE_AI_API_KEY in .env.local.", {
-      status: 500
-    });
-  }
-
   const body = (await request.json()) as { messages?: CoreMessage[] };
   const clientMessages = (body.messages ?? []).filter((message): message is ClientMessage => {
     return (
@@ -330,12 +480,25 @@ export async function POST(request: Request) {
   const messages = firstUserIndex >= 0 ? clientMessages.slice(firstUserIndex) : [];
 
   if (messages.length === 0) {
-    return new Response("Please send a cricket question to CricBot AI.", { status: 400 });
+    return new Response("Please send a football or cricket question to SportBot AI.", { status: 400 });
   }
 
   const question = latestUserQuestion(messages);
-  if (isRecentFormQuestion(question)) {
-    return textResponse(await answerRecentFormQuestion(question));
+  try {
+    if (isFootballQuestion(question)) {
+      return textResponse(await answerFootballQuestion(question));
+    }
+
+    if (isRecentFormQuestion(question)) {
+      return textResponse(await answerRecentFormQuestion(question));
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "The sports data service is unavailable.";
+    return textResponse(`I could not fetch the requested sports data right now.\n\nDetail: ${detail}`);
+  }
+
+  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return textResponse(await localCricketFallback(messages));
   }
 
   try {
@@ -389,6 +552,32 @@ export async function POST(request: Request) {
               return { error: formatToolError(error) };
             }
           }
+        }),
+        football_matches_today: tool({
+          description: "Get today's football/soccer matches from TheSportsDB.",
+          parameters: z.object({}),
+          execute: async () => getFootballMatchesByDate(todayIsoDate())
+        }),
+        football_team_past_matches: tool({
+          description: "Get recent/past football matches for a team.",
+          parameters: z.object({
+            teamName: z.string().min(1)
+          }),
+          execute: async ({ teamName }) => getFootballTeamPastMatches(teamName)
+        }),
+        football_team_next_matches: tool({
+          description: "Get upcoming football fixtures for a team.",
+          parameters: z.object({
+            teamName: z.string().min(1)
+          }),
+          execute: async ({ teamName }) => getFootballTeamNextMatches(teamName)
+        }),
+        football_team_search: tool({
+          description: "Search football/soccer teams in TheSportsDB.",
+          parameters: z.object({
+            teamName: z.string().min(1)
+          }),
+          execute: async ({ teamName }) => searchFootballTeams(teamName)
         }),
         player_search: tool({
           description: "Search cricket players by name.",

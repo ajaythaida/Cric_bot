@@ -2,11 +2,12 @@
 
 const prompts = [
   "Show current cricket matches",
-  "Who is likely to win today's match?",
+  "Show football matches today",
+  "Show Arsenal past matches",
+  "Show Barcelona upcoming fixtures",
   "Show India recent form",
   "Search Virat Kohli stats",
-  "Explain CSK team history",
-  "Compare India and Australia"
+  "Explain CSK team history"
 ];
 
 interface SuggestedPromptsProps {

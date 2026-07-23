@@ -1,15 +1,16 @@
-# CricBot AI
+# SportBot AI
 
-CricBot AI is a cricket-focused chatbot web app for a college mini project demo. It answers questions about live matches, schedules, players, scorecards, squads, team history, comparisons, recent performance, and basic match predictions.
+SportBot AI is a football and cricket chatbot web app for a college mini project demo. It answers questions about current matches, past matches, upcoming fixtures, players, cricket scorecards, team history, comparisons, recent performance, and basic match predictions.
 
-The app uses Next.js App Router, TypeScript, Tailwind CSS, Vercel AI SDK, Google Gemini Flash, and CricketData/CricAPI REST endpoints. API keys stay on the server.
+The app uses Next.js App Router, TypeScript, Tailwind CSS, Vercel AI SDK, Google Gemini Flash, CricketData/CricAPI, and TheSportsDB. API keys stay on the server.
 
 ## Features
 
-- Cricket-themed chat UI with suggested prompt chips.
+- Sports-themed chat UI with suggested prompt chips.
 - Server-side `/api/chat` route powered by Gemini Flash.
-- AI tool calling for live matches, match lists, player search, scorecards, squads, series info, and predictions.
+- AI tool calling for cricket live matches, football fixtures, player search, scorecards, squads, team info, and predictions.
 - CricAPI service layer with timeout handling, friendly errors, normalized data, and short in-memory caching.
+- TheSportsDB service layer for football teams, today's matches, past matches, and upcoming fixtures.
 - Heuristic match prediction with confidence, key factors, risks, and disclaimer.
 - No database required for MVP.
 
@@ -21,6 +22,7 @@ The app uses Next.js App Router, TypeScript, Tailwind CSS, Vercel AI SDK, Google
 - Vercel AI SDK
 - Google Gemini Flash
 - CricketData / CricAPI REST API
+- TheSportsDB REST API
 
 ## Setup
 
@@ -65,10 +67,17 @@ npm run lint
 - `https://api.cricapi.com/v1/match_scorecard`
 - `https://api.cricapi.com/v1/match_squad`
 - `https://api.cricapi.com/v1/match_points`
+- `https://www.thesportsdb.com/api/v1/json/123/searchteams.php`
+- `https://www.thesportsdb.com/api/v1/json/123/eventsday.php`
+- `https://www.thesportsdb.com/api/v1/json/123/eventslast.php`
+- `https://www.thesportsdb.com/api/v1/json/123/eventsnext.php`
 
 ## Example Prompts
 
 - Show current cricket matches
+- Show football matches today
+- Show Arsenal past matches
+- Show Barcelona upcoming fixtures
 - Who is likely to win today's match?
 - Show India recent form
 - Search Virat Kohli stats
@@ -92,6 +101,7 @@ This server-only debug endpoint checks:
 - CricketData player search for Virat Kohli
 - Google Gemini Flash text generation
 - TheSportsDB team metadata for Chennai Super Kings
+- TheSportsDB football matches today and Arsenal past matches
 
 It returns whether keys are configured and small sample responses, but never returns the API keys.
 

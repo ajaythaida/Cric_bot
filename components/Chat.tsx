@@ -5,10 +5,13 @@ import { MessageBubble } from "@/components/MessageBubble";
 import { SuggestedPrompts } from "@/components/SuggestedPrompts";
 
 const WELCOME_MESSAGE =
-  "Hi, I am CricBot AI. Ask me about live matches, schedules, scorecards, squads, player form, team comparisons, or match predictions.";
+  "Hi, I am SportBot AI. Ask me about football and cricket matches, schedules, scorecards, team form, team history, and basic predictions.";
 const EMPTY_RESPONSE_MESSAGE =
   "I could not generate a response this time. Please check the server console and try again.";
-const MODEL_ERROR_PREFIX = "I could not generate a cricket answer right now.";
+const MODEL_ERROR_PREFIXES = [
+  "I could not generate a sports answer right now.",
+  "I could not generate a cricket answer right now."
+];
 
 function shouldSendToModel(message: ChatMessage): boolean {
   const content = message.content.trim();
@@ -16,7 +19,7 @@ function shouldSendToModel(message: ChatMessage): boolean {
     content &&
       content !== WELCOME_MESSAGE &&
       content !== EMPTY_RESPONSE_MESSAGE &&
-      !content.startsWith(MODEL_ERROR_PREFIX)
+      !MODEL_ERROR_PREFIXES.some((prefix) => content.startsWith(prefix))
   );
 }
 
@@ -158,13 +161,13 @@ export function Chat() {
       <header className="border-b border-pitch-100 bg-white px-5 py-4 sm:px-7">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-normal text-pitch-900 sm:text-3xl">CricBot AI</h1>
+            <h1 className="text-2xl font-bold tracking-normal text-pitch-900 sm:text-3xl">SportBot AI</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Live scores, player form, team analysis & predictions
+              Football & cricket matches, form, history and predictions
             </p>
           </div>
           <div className="w-fit rounded-full bg-pitch-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-pitch-700">
-            Cricket AI analyst
+            Football + Cricket AI
           </div>
         </div>
       </header>
@@ -179,7 +182,7 @@ export function Chat() {
           {isLoading ? (
             <div className="flex justify-start">
               <div className="rounded-2xl rounded-bl-md border border-pitch-100 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
-                CricBot is checking the cricket data...
+                SportBot is checking the sports data...
               </div>
             </div>
           ) : null}
@@ -193,8 +196,8 @@ export function Chat() {
           <input
             value={input}
             disabled={isLoading}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask about live scores, players, squads, or predictions..."
+            onChange={(event) => setInput(event.currentTarget.value)}
+            placeholder="Ask about football or cricket matches, teams, players, or predictions..."
             className="min-w-0 flex-1 rounded-2xl border border-pitch-100 bg-pitch-50 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-pitch-500 focus:bg-white focus:ring-4 focus:ring-pitch-100 disabled:opacity-70"
           />
           <button

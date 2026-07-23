@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CricBot AI",
-  description: "Live cricket scores, player form, team analysis, and match predictions."
+  title: "SportBot AI",
+  description: "Football and cricket matches, team form, history, and predictions."
 };
 
 export default function RootLayout({
