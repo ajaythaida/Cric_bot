@@ -1,13 +1,22 @@
 "use client";
 
 const prompts = [
-  "Show current cricket matches",
-  "Show football matches today",
-  "Show Arsenal past matches",
-  "Show Barcelona upcoming fixtures",
   "Show India recent form",
-  "Search Virat Kohli stats",
-  "Explain CSK team history"
+  "🏏 India cricket team and players",
+  "🏏 Virat Kohli recent performance",
+  "🏏 Jasprit Bumrah player profile",
+  "IND latest match score",
+  "India next cricket match",
+  "Who won yesterday's India match?",
+  "Explain Team India history",
+  "⚽ India football team and players",
+  "⚽ Sunil Chhetri recent performance",
+  "⚽ Lionel Messi recent performance",
+  "India football recent matches",
+  "Who won the 2026 Men's T20 World Cup?",
+  "Who won the 2026 FIFA World Cup?",
+  "Who won the 2011 Cricket World Cup final?",
+  "Show football matches today"
 ];
 
 interface SuggestedPromptsProps {

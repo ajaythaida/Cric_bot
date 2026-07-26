@@ -7,7 +7,8 @@ import { SuggestedPrompts } from "@/components/SuggestedPrompts";
 const WELCOME_MESSAGE =
   "Hi, I am SportBot AI. Ask me about football and cricket matches, schedules, scorecards, team form, team history, and basic predictions.";
 const EMPTY_RESPONSE_MESSAGE =
-  "I could not generate a response this time. Please check the server console and try again.";
+  "I could not find a complete answer this time. Please rephrase the question with the sport, team, competition, or year.";
+const EMPTY_RESPONSE_PREFIX = "I could not generate a response this time.";
 const MODEL_ERROR_PREFIXES = [
   "I could not generate a sports answer right now.",
   "I could not generate a cricket answer right now."
@@ -19,6 +20,7 @@ function shouldSendToModel(message: ChatMessage): boolean {
     content &&
       content !== WELCOME_MESSAGE &&
       content !== EMPTY_RESPONSE_MESSAGE &&
+      !content.startsWith(EMPTY_RESPONSE_PREFIX) &&
       !MODEL_ERROR_PREFIXES.some((prefix) => content.startsWith(prefix))
   );
 }

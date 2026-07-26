@@ -83,6 +83,18 @@ const BUILT_IN_TEAM_PROFILES: SportsDbTeam[] = [
     stadium: "Various home venues",
     description:
       "Australia are historically one of cricket's most successful international teams. They are known for aggressive cricket, pace bowling depth, strong fielding standards, and a long record of success in Tests, ODIs, and ICC tournaments."
+  },
+  {
+    id: "builtin-india-football",
+    name: "India",
+    shortName: "IND",
+    alternateNames: "India national football team, Blue Tigers",
+    sport: "Soccer",
+    league: "International Football",
+    country: "India",
+    stadium: "Various home venues",
+    description:
+      "The India national football team, known as the Blue Tigers, represents India in men's international football. The team competes in FIFA, AFC, SAFF, and other international competitions."
   }
 ];
 
@@ -183,9 +195,7 @@ async function fetchSportsDb<T>(endpoint: string, params: Record<string, string>
 }
 
 export async function searchTeamsBySport(teamName: string, sport: string): Promise<SportsDbTeam[]> {
-  const body = await fetchSportsDb<SportsDbEnvelope<unknown>>("searchteams.php", { t: teamName });
   const lowerSport = sport.toLowerCase();
-  const apiTeams = (body.teams ?? []).map(normalizeTeam).filter((team) => team.sport?.toLowerCase() === lowerSport);
   const lowerName = teamName.toLowerCase();
   const builtIns = BUILT_IN_TEAM_PROFILES.filter((team) => {
     return (
@@ -195,6 +205,16 @@ export async function searchTeamsBySport(teamName: string, sport: string): Promi
         .some((value) => value?.toLowerCase().includes(lowerName) || lowerName.includes(value?.toLowerCase() ?? ""))
     );
   });
+  let apiTeams: SportsDbTeam[] = [];
+
+  try {
+    const body = await fetchSportsDb<SportsDbEnvelope<unknown>>("searchteams.php", { t: teamName });
+    apiTeams = (body.teams ?? [])
+      .map(normalizeTeam)
+      .filter((team) => team.sport?.toLowerCase() === lowerSport);
+  } catch {
+    return builtIns;
+  }
 
   return [...apiTeams, ...builtIns];
 }
