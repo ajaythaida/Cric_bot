@@ -136,8 +136,9 @@ export function Chat() {
           )
         );
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Something went wrong. Please try again.";
+    } catch {
+      const message =
+        "I’m temporarily unable to connect to the sports service. Please try again in a moment.";
       setMessages((current) =>
         current.map((item) =>
           item.id === assistantId

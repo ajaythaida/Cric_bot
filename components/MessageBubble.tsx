@@ -30,6 +30,16 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               ol: ({ children }) => <ol className="mb-3 list-decimal space-y-1.5 pl-4 last:mb-0">{children}</ol>,
               li: ({ children }) => <li className="list-disc pl-1">{children}</li>,
               strong: ({ children }) => <strong className="font-semibold text-pitch-900">{children}</strong>,
+              a: ({ children, href }) => (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-pitch-700 underline decoration-pitch-300 underline-offset-2 hover:text-pitch-900"
+                >
+                  {children} ↗
+                </a>
+              ),
               code: ({ children }) => (
                 <code className="rounded bg-pitch-50 px-1.5 py-0.5 text-[0.85em] text-pitch-900">{children}</code>
               )

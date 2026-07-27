@@ -11,6 +11,8 @@ import {
 } from "@/lib/cricketData";
 import { predictMatch } from "@/lib/prediction";
 import { normalizeSportsQuestion } from "@/lib/questionNormalizer";
+import { runSportsResearchAgent } from "@/lib/sportsResearchAgent";
+import { getVerifiedSportsSnapshot } from "@/lib/verifiedSportsSnapshots";
 import {
   getFootballMatchesByDate,
   getFootballTeamNextMatches,
@@ -22,7 +24,6 @@ import {
   type SportsDbEvent,
   type SportsDbTeam
 } from "@/lib/theSportsDb";
-import { searchSportsWeb } from "@/lib/webSportsSearch";
 import type { NormalizedMatch, NormalizedPlayer } from "@/types/cricket";
 
 export const runtime = "nodejs";
@@ -77,6 +78,7 @@ const CRICKET_TEAM_NAMES = [
   "Sri Lanka",
   "Bangladesh",
   "Afghanistan",
+  "Zimbabwe",
   "Chennai Super Kings",
   "Royal Challengers Bengaluru",
   "Sunrisers Hyderabad",
@@ -216,7 +218,7 @@ function mentionedCricketTeams(question: string): string[] {
 function isTeamMatchLookupQuestion(question: string): boolean {
   return (
     mentionedCricketTeams(question).length > 0 &&
-    /(score|latest|last|next|upcoming|today|current|result|matches?)/i.test(question) &&
+    /(score|latest|last|next|upcoming|today|current|result|matches?|\bvs\b|\bversus\b)/i.test(question) &&
     !/(predict|prediction|likely|will win|can win|recent form)/i.test(question)
   );
 }
@@ -545,9 +547,9 @@ async function answerCompletedMatchQuestion(messages: ClientMessage[]): Promise<
       .join("\n");
   }
 
-  const webAnswer = await searchSportsWeb(messages, todayIsoDate());
-  if (webAnswer) {
-    return `## Web result for ${date}\n\n${webAnswer}`;
+  const researchedAnswer = await webAnswerOrNotFound(messages);
+  if (researchedAnswer !== NOT_FOUND_MESSAGE) {
+    return researchedAnswer;
   }
 
   return [
@@ -570,10 +572,14 @@ function matchMentionsTeam(match: NormalizedMatch, teamName: string): boolean {
 
 async function webAnswerOrNotFound(messages: ClientMessage[]): Promise<string> {
   try {
-    return (await searchSportsWeb(messages, todayIsoDate())) ?? NOT_FOUND_MESSAGE;
+    return (
+      (await runSportsResearchAgent(messages, todayIsoDate())) ??
+      getVerifiedSportsSnapshot(latestUserQuestion(messages)) ??
+      NOT_FOUND_MESSAGE
+    );
   } catch (error) {
     console.error("Sports web search failed:", error instanceof Error ? error.message : error);
-    return NOT_FOUND_MESSAGE;
+    return getVerifiedSportsSnapshot(latestUserQuestion(messages)) ?? NOT_FOUND_MESSAGE;
   }
 }
 
@@ -1074,7 +1080,7 @@ async function localSportsFallback(messages: ClientMessage[], _error?: unknown):
 
     return `${errorNote}${await webAnswerOrNotFound(messages)}`;
   } catch {
-    return NOT_FOUND_MESSAGE;
+    return webAnswerOrNotFound(messages);
   }
 }
 
@@ -1112,6 +1118,13 @@ export async function POST(request: Request) {
       return textResponse(
         "SportBot currently covers cricket and football. More sports are planned for a future version."
       );
+    }
+
+    const primaryResearchAnswer = await runSportsResearchAgent(messages, todayIsoDate()).catch(
+      () => null
+    );
+    if (primaryResearchAnswer) {
+      return textResponse(primaryResearchAnswer);
     }
 
     if (isTournamentHistoryQuestion(question)) {
