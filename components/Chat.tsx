@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { MessageBubble } from "@/components/MessageBubble";
 import { SuggestedPrompts } from "@/components/SuggestedPrompts";
+import { MatchUpdates } from "@/components/MatchUpdates";
 
 const WELCOME_MESSAGE =
   "Hi, I am SportBot AI. Ask me about football and cricket matches, schedules, scorecards, team form, team history, and basic predictions.";
@@ -176,6 +177,7 @@ export function Chat() {
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-7">
+        <MatchUpdates />
         <div className="space-y-4">
           {messages.map((message) =>
             message.content || message.role === "user" ? (

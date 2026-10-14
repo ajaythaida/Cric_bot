@@ -184,7 +184,7 @@ async function fetchSportsDb<T>(endpoint: string, params: Record<string, string>
 
     const body = (await response.json()) as T;
     cache.set(cacheKey, {
-      expiresAt: Date.now() + CACHE_TTL_MS,
+      expiresAt: Date.now() + (endpoint.startsWith("events") || endpoint === "eventslast.php" ? 45_000 : CACHE_TTL_MS),
       value: body
     });
 

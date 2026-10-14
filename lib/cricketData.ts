@@ -176,6 +176,21 @@ export async function getMatches(offset = 0): Promise<NormalizedMatch[]> {
   }
 }
 
+export async function getMatchWindow(): Promise<{ matches: NormalizedMatch[]; partial: boolean }> {
+  const results = await Promise.allSettled([
+    ...[0, 25, 50].map((offset) => getCurrentMatches(offset)),
+    ...[0, 25, 50].map((offset) => getMatches(offset))
+  ]);
+  if (results.every((result) => result.status === "rejected")) {
+    throw new CricketDataError("Match updates are temporarily unavailable.", "API_ERROR");
+  }
+  const matches = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+  return {
+    matches: matches.filter((match, index) => matches.findIndex((other) => other.id === match.id) === index),
+    partial: results.some((result) => result.status === "rejected")
+  };
+}
+
 export async function getSeriesInfo(seriesId: string): Promise<NormalizedSeriesInfo> {
   const data = await fetchCricketData<unknown>("/series_info", { offset: 0, id: seriesId });
   const item = asRecord(data);

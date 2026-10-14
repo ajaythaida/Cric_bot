@@ -7,6 +7,9 @@ The app uses Next.js App Router, TypeScript, Tailwind CSS, Vercel AI SDK, Google
 ## Features
 
 - Sports-themed chat UI with suggested prompt chips.
+- Match updates panel for cricket and football, with Live, Upcoming, and Results tabs and automatic refresh every 60 seconds while the page is open.
+- Current questions use the current date in Asia/Kolkata. Fixed July snapshots are no longer used for current answers.
+- Match status is checked on every refresh. Finished matches move to Results; a score alone is never treated as a final result. Stale, postponed, and unknown-status entries are excluded from live/upcoming lists.
 - Server-side `/api/chat` route powered by Gemini Flash.
 - AI tool calling for cricket live matches, football fixtures, player search, scorecards, squads, team info, and predictions.
 - CricAPI service layer with timeout handling, friendly errors, normalized data, and short in-memory caching.
@@ -56,6 +59,7 @@ npm run dev
 npm run build
 npm run start
 npm run lint
+npm test
 ```
 
 ## API Endpoints Used
@@ -87,6 +91,10 @@ npm run lint
 - Show squads for match ID `MATCH_ID`
 
 ## Test API Keys
+
+`/api/matches?sport=cricket` and `/api/matches?sport=football` return the match panel's latest checked data with no browser caching. Cricket reads three pages of current matches and fixtures, retaining available results from the last 30 days; football reads yesterday, today, and tomorrow. Coverage and update speed depend on the configured data subscription. This is a current match window, not a complete historical archive. Chat can research explicitly dated older results.
+
+The panel retries every minute, identifies partial responses, and warns when previously loaded scores may be stale. Current research answers are cached for 45 seconds; old or undated news snippets are not used as a substitute for verified current match status. Future results appear only after a source reports completion.
 
 After adding `.env.local` and starting the dev server, open:
 

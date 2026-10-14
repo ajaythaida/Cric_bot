@@ -1,6 +1,7 @@
 node_modules
 .next
 .next-local
+.next-match-updates
 out
 dist
 .env

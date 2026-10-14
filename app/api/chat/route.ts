@@ -3,12 +3,14 @@ import { streamText, tool, type CoreMessage } from "ai";
 import { z } from "zod";
 import {
   getCurrentMatches,
+  getMatchWindow,
   getMatches,
   getMatchScorecard,
   getMatchSquad,
   getSeriesInfo,
   searchPlayers
 } from "@/lib/cricketData";
+import { cricketPhase, footballPhase, selectCricketMatches, shiftDate, sportsDate } from "@/lib/matchStatus";
 import { predictMatch } from "@/lib/prediction";
 import { normalizeSportsQuestion } from "@/lib/questionNormalizer";
 import { runSportsResearchAgent } from "@/lib/sportsResearchAgent";
@@ -90,44 +92,6 @@ const CRICKET_TEAM_NAMES = [
   "Gujarat Titans",
   "Lucknow Super Giants"
 ];
-const FOOTBALL_WORLD_CUP_WINS: Record<
-  string,
-  { years: number[]; latestResult: string }
-> = {
-  Argentina: {
-    years: [1978, 1986, 2022],
-    latestResult: "Argentina defeated France on penalties after a 3-3 draw in the 2022 final."
-  },
-  Brazil: {
-    years: [1958, 1962, 1970, 1994, 2002],
-    latestResult: "Brazil defeated Germany 2-0 in the 2002 final."
-  },
-  England: {
-    years: [1966],
-    latestResult: "England defeated West Germany 4-2 after extra time in the 1966 final."
-  },
-  France: {
-    years: [1998, 2018],
-    latestResult: "France defeated Croatia 4-2 in the 2018 final."
-  },
-  Germany: {
-    years: [1954, 1974, 1990, 2014],
-    latestResult: "Germany defeated Argentina 1-0 after extra time in the 2014 final."
-  },
-  Italy: {
-    years: [1934, 1938, 1982, 2006],
-    latestResult: "Italy defeated France on penalties after a 1-1 draw in the 2006 final."
-  },
-  Spain: {
-    years: [2010, 2026],
-    latestResult: "Spain defeated Argentina 1-0 after extra time in the 2026 final."
-  },
-  Uruguay: {
-    years: [1930, 1950],
-    latestResult: "Uruguay's most recent title came in 1950 after defeating Brazil 2-1 in the decisive match."
-  }
-};
-
 function formatToolError(_error: unknown): string {
   return "Verified sports information is temporarily unavailable. Please try again later.";
 }
@@ -158,7 +122,7 @@ function isFootballQuestion(question: string): boolean {
 function isDirectFootballDataQuestion(question: string): boolean {
   return (
     isFootballQuestion(question) &&
-    /(today|live|current|past|previous|recent|form|last|next|upcoming|schedule|fixtures?|profile|history|about|team)/i.test(
+    /(today|live|current|past|previous|recent|form|last|next|upcoming|future|tomorrow|schedule|fixtures?|profile|history|about|team)/i.test(
       question
     )
   );
@@ -219,7 +183,8 @@ function isTeamMatchLookupQuestion(question: string): boolean {
   return (
     mentionedCricketTeams(question).length > 0 &&
     /(score|latest|last|next|upcoming|today|current|result|matches?|\bvs\b|\bversus\b)/i.test(question) &&
-    !/(predict|prediction|likely|will win|can win|recent form)/i.test(question)
+    !/(predict|prediction|likely|will win|can win)/i.test(question) &&
+    !isRecentFormQuestion(question)
   );
 }
 
@@ -405,26 +370,12 @@ function extractFootballTeamName(question: string): string {
   }
 
   return question
-    .replace(/show|football|soccer|past|previous|recent|form|upcoming|next|matches|match|fixtures|fixture|live|today|for|of|\?/gi, "")
+    .replace(/\b(show|football|soccer|past|previous|recent|form|upcoming|future|tomorrow|schedule|next|matches|match|fixtures|fixture|live|today|for|of)\b|\?/gi, "")
     .trim();
 }
 
 function todayIsoDate(): string {
-  const dateParts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: process.env.SPORTS_TIME_ZONE ?? "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  })
-    .formatToParts(new Date())
-    .reduce<Record<string, string>>((parts, part) => {
-      if (part.type !== "literal") {
-        parts[part.type] = part.value;
-      }
-      return parts;
-    }, {});
-
-  return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+  return sportsDate();
 }
 
 function shiftIsoDate(isoDate: string, days: number): string {
@@ -517,12 +468,13 @@ async function answerCompletedMatchQuestion(messages: ClientMessage[]): Promise<
           .flat()
           .filter((match, index, matches) => matchDate(match) === date && matches.findIndex((item) => item.id === match.id) === index)
           .filter((match) => requestedCricketTeams.every((team) => matchMentionsTeam(match, team)))
-          .filter((match) => match.matchEnded || /\b(won|draw|no result|abandon)/i.test(match.status ?? ""))
+          .filter((match) => cricketPhase(match) === "completed")
       : [];
   const footballMatches =
     footballResult.status === "fulfilled"
       ? footballResult.value.filter(
-          (event) => event.homeScore !== undefined && event.awayScore !== undefined
+          (event) => event.date === date && footballPhase(event) === "completed" &&
+            event.homeScore !== undefined && event.awayScore !== undefined
         )
       : [];
 
@@ -588,105 +540,6 @@ async function answerHistoricalSportsQuestion(messages: ClientMessage[]): Promis
 }
 
 async function answerTournamentHistoryQuestion(messages: ClientMessage[]): Promise<string> {
-  const question = latestUserQuestion(messages);
-  const lowerQuestion = question.toLowerCase();
-  const asksCurrentWinner = /\b(latest|current|present|2026|who won|winner|champion)\b/i.test(
-    question
-  );
-
-  if (/\b(t20|twenty20)\b/i.test(question) && /\bworld cup\b/i.test(question)) {
-    if (/\b(women|women's|womens)\b/i.test(question)) {
-      return [
-        "## 2026 Women's T20 World Cup winner",
-        "",
-        "**Australia** won the 2026 ICC Women's T20 World Cup.",
-        "",
-        "Australia defeated England by 7 wickets in the final at Lord's on 5 July 2026.",
-        "",
-        "[Source: ICC](https://www.icc-cricket.com/tournaments/womens-t20-worldcup-2026/news/england-australia-final-womens-t20-world-cup-2026)"
-      ].join("\n");
-    }
-
-    if (asksCurrentWinner && !lowerQuestion.includes("india")) {
-      return [
-        "## 2026 Men's T20 World Cup winner",
-        "",
-        "**India** won the 2026 ICC Men's T20 World Cup.",
-        "",
-        "India defeated New Zealand by 96 runs in the final at Ahmedabad on 8 March 2026. India scored 255/5 and dismissed New Zealand for 159.",
-        "",
-        "[Source: ICC](https://www.icc-cricket.com/tournaments/mens-t20-world-cup-2026/news/live-india-new-zealand-chase-world-cup-glory)"
-      ].join("\n");
-    }
-  }
-
-  if (lowerQuestion.includes("india") && /\bworld cup\b/i.test(question)) {
-    if (/\bt20\b/i.test(question)) {
-      return [
-        "## India men's T20 World Cup titles",
-        "",
-        "India have won the men's T20 World Cup three times: **2007, 2024, and 2026**.",
-        "",
-        "**Most recent title:** 8 March 2026 — India defeated New Zealand by 96 runs in the final at Ahmedabad. India scored 255/5 and dismissed New Zealand for 159.",
-        "",
-        "[Source: ICC](https://www.icc-cricket.com/tournaments/mens-t20-world-cup-2026/news/live-india-new-zealand-chase-world-cup-glory)"
-      ].join("\n");
-    }
-
-    if (/\b(odi|one-day|50-over|cricket)\b/i.test(question)) {
-      return [
-        "## India men's ODI World Cup titles",
-        "",
-        "India have won the men's ODI Cricket World Cup twice: **1983** and **2011**.",
-        "",
-        "**Most recent title:** 2 April 2011 — India defeated Sri Lanka by 6 wickets in the final at Wankhede Stadium, Mumbai."
-      ].join("\n");
-    }
-
-    return [
-      "## India's men's Cricket World Cup titles",
-      "",
-      "- **ODI World Cup:** 1983 and 2011",
-      "- **T20 World Cup:** 2007, 2024, and 2026",
-      "",
-      "Tell me ODI or T20 if you want the final score and opponent."
-    ].join("\n");
-  }
-
-  if (/\b(world cup|fifa)\b/i.test(question)) {
-    const explicitFootball = /\b(football|soccer|fifa)\b/i.test(question);
-    const teamName = Object.keys(FOOTBALL_WORLD_CUP_WINS).find((team) =>
-      new RegExp(`\\b${team}\\b`, "i").test(question)
-    );
-    const isUnambiguousFootballTeam =
-      teamName !== undefined && !CRICKET_TEAM_NAMES.includes(teamName);
-
-    if (teamName && (explicitFootball || isUnambiguousFootballTeam)) {
-      const record = FOOTBALL_WORLD_CUP_WINS[teamName];
-      return [
-        `## ${teamName} FIFA World Cup titles`,
-        "",
-        `${teamName} ${record.years.length === 1 ? "have" : "have"} won the men's FIFA World Cup ${
-          record.years.length
-        } ${record.years.length === 1 ? "time" : "times"}: **${record.years.join(", ")}**.`,
-        "",
-        `**Most recent title:** ${record.latestResult}`
-      ].join("\n");
-    }
-
-    if (explicitFootball && asksCurrentWinner) {
-      return [
-        "## 2026 FIFA World Cup winner",
-        "",
-        "**Spain** won the 2026 men's FIFA World Cup.",
-        "",
-        "Spain defeated Argentina 1-0 after extra time in the final on 19 July 2026. Ferran Torres scored the winning goal in the 106th minute.",
-        "",
-        "[Source: FIFA](https://www.fifa.com/en/tournaments/mens/worldcup/canadamexicousa2026/articles/spain-argentina-final-report-highlights)"
-      ].join("\n");
-    }
-  }
-
   return webAnswerOrNotFound(messages);
 }
 
@@ -815,64 +668,25 @@ async function answerTeamOrPlayerInfoQuestion(messages: ClientMessage[]): Promis
 async function answerTeamMatchLookup(messages: ClientMessage[]): Promise<string> {
   const question = latestUserQuestion(messages);
   const teams = mentionedCricketTeams(question);
-  const [currentResult, listedResult] = await Promise.allSettled([getCurrentMatches(0), getMatches(0)]);
-  const matches = [
-    ...(currentResult.status === "fulfilled" ? currentResult.value : []),
-    ...(listedResult.status === "fulfilled" ? listedResult.value : [])
-  ]
-    .filter((match, index, allMatches) => allMatches.findIndex((item) => item.id === match.id) === index)
+  const { matches } = await getMatchWindow();
+  const wantsUpcoming = /\b(next|upcoming|future|schedule|fixtures?|tomorrow)\b/i.test(question);
+  const candidates = selectCricketMatches(matches, question, todayIsoDate())
     .filter((match) => teams.every((team) => matchMentionsTeam(match, team)));
-  const wantsUpcoming = /(next|upcoming|schedule|fixture|tomorrow)/i.test(question);
-  const wantsCompleted = /(last|latest|result|won)/i.test(question);
-  const candidates = matches
-    .filter((match) => {
-      const date = matchDate(match);
-      if (wantsUpcoming) {
-        return !match.matchEnded && (!date || date >= todayIsoDate());
-      }
-      if (wantsCompleted) {
-        return match.matchEnded || /\b(won|draw|no result|abandon)/i.test(match.status ?? "");
-      }
-      return true;
-    })
-    .sort((matchA, matchB) => {
-      const dateA = matchDate(matchA) ?? "";
-      const dateB = matchDate(matchB) ?? "";
-      return wantsUpcoming ? dateA.localeCompare(dateB) : dateB.localeCompare(dateA);
-    });
 
   if (!candidates.length) {
     return webAnswerOrNotFound(messages);
   }
 
   const heading = wantsUpcoming
-    ? `${teams.join(" vs ")} upcoming matches`
-    : `${teams.join(" vs ")} latest match information`;
-  return `## ${heading}\n\n${candidates.slice(0, wantsUpcoming ? 3 : 1).map(formatMatch).join("\n\n")}`;
+    ? `${teams.join(" vs ") || "Cricket"} upcoming matches`
+    : `${teams.join(" vs ") || "Cricket"} match updates as of ${todayIsoDate()}`;
+  return `## ${heading}\n\n${candidates.slice(0, teams.length ? (wantsUpcoming ? 3 : 1) : 5).map(formatMatch).join("\n\n")}`;
 }
 
 async function getRecentTeamMatches(teamName: string): Promise<NormalizedMatch[]> {
-  const [currentMatches, listedMatches] = await Promise.allSettled([getCurrentMatches(0), getMatches(0)]);
-  const matches = [
-    ...(currentMatches.status === "fulfilled" ? currentMatches.value : []),
-    ...(listedMatches.status === "fulfilled" ? listedMatches.value : [])
-  ];
-  const seen = new Set<string>();
-
-  return matches
-    .filter((match) => matchMentionsTeam(match, teamName))
-    .filter((match) => match.matchEnded || /\b(won|draw|no result|abandon)/i.test(match.status ?? ""))
-    .filter((match) => !matchDate(match) || matchDate(match)! <= todayIsoDate())
-    .filter((match) => {
-      if (seen.has(match.id)) {
-        return false;
-      }
-
-      seen.add(match.id);
-      return true;
-    })
-    .sort((matchA, matchB) => (matchDate(matchB) ?? "").localeCompare(matchDate(matchA) ?? ""))
-    .slice(0, 5);
+  const { matches } = await getMatchWindow();
+  return selectCricketMatches(matches, "recent results", todayIsoDate())
+    .filter((match) => matchMentionsTeam(match, teamName)).slice(0, 5);
 }
 
 async function answerRecentFormQuestion(messages: ClientMessage[]): Promise<string> {
@@ -893,18 +707,25 @@ async function answerRecentFormQuestion(messages: ClientMessage[]): Promise<stri
 
 async function answerFootballQuestion(messages: ClientMessage[]): Promise<string> {
   const question = latestUserQuestion(messages);
-  if (/(today|live|current)/i.test(question)) {
-    const matches = await getFootballMatchesByDate(todayIsoDate());
+  if (/(today|live|current|tomorrow)/i.test(question)) {
+    const date = /tomorrow/i.test(question) ? shiftDate(todayIsoDate(), 1) : todayIsoDate();
+    const teamName = extractFootballTeamName(question);
+    const namedTeam = /india|arsenal|chelsea|liverpool|manchester|barcelona|madrid|bayern|juventus|milan|paris|argentina|brazil|france|germany|spain|portugal/i.test(teamName);
+    const matches = (await getFootballMatchesByDate(date)).filter((event) =>
+      event.date === date &&
+      (!namedTeam || [event.homeTeam, event.awayTeam].some((team) => team?.toLowerCase() === teamName.toLowerCase())) &&
+      (/\blive\b/i.test(question) ? footballPhase(event) === "live" : /next|upcoming|future|tomorrow/i.test(question) ? footballPhase(event) === "upcoming" : footballPhase(event) !== "unknown")
+    );
     if (!matches.length) {
       return webAnswerOrNotFound(messages);
     }
 
-    return `## Football matches today\n\n${matches.slice(0, 5).map(formatFootballEvent).join("\n\n")}`;
+    return `## Football matches — ${date}\n\n${matches.slice(0, 5).map(formatFootballEvent).join("\n\n")}`;
   }
 
   if (/(past|previous|recent|form|last)/i.test(question)) {
     const teamName = extractFootballTeamName(question);
-    const matches = await getFootballTeamPastMatches(teamName);
+    const matches = (await getFootballTeamPastMatches(teamName)).filter((event) => footballPhase(event) === "completed" && event.date! >= shiftDate(todayIsoDate(), -30)).sort((a, b) => b.date!.localeCompare(a.date!));
     if (!matches.length) {
       return webAnswerOrNotFound(messages);
     }
@@ -912,14 +733,18 @@ async function answerFootballQuestion(messages: ClientMessage[]): Promise<string
     return `## ${teamName} past matches\n\n${matches.slice(0, 5).map(formatFootballEvent).join("\n\n")}`;
   }
 
-  if (/(next|upcoming|schedule|fixtures)/i.test(question)) {
+  if (/(next|upcoming|future|tomorrow|schedule|fixtures)/i.test(question)) {
     const teamName = extractFootballTeamName(question);
-    const matches = await getFootballTeamNextMatches(teamName);
+    const available = teamName
+      ? await getFootballTeamNextMatches(teamName)
+      : (await Promise.allSettled(Array.from({ length: 7 }, (_, day) => getFootballMatchesByDate(shiftDate(todayIsoDate(), day)))))
+          .flatMap((result) => result.status === "fulfilled" ? result.value : []);
+    const matches = available.filter((event) => footballPhase(event) === "upcoming").sort((a, b) => a.date!.localeCompare(b.date!));
     if (!matches.length) {
       return webAnswerOrNotFound(messages);
     }
 
-    return `## ${teamName} upcoming matches\n\n${matches.slice(0, 5).map(formatFootballEvent).join("\n\n")}`;
+    return `## ${teamName || "Football"} upcoming matches\n\n${matches.slice(0, 5).map(formatFootballEvent).join("\n\n")}`;
   }
 
   if (/(profile|history|about|team)/i.test(question)) {
@@ -950,7 +775,8 @@ async function answerFootballQuestion(messages: ClientMessage[]): Promise<string
 function textResponse(content: string): Response {
   return new Response(content, {
     headers: {
-      "Content-Type": "text/plain; charset=utf-8"
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store"
     }
   });
 }
@@ -997,12 +823,12 @@ async function localSportsFallback(messages: ClientMessage[], _error?: unknown):
       return `${errorNote}${await answerPlayerStatsQuestion(messages)}`;
     }
 
-    if (isRecentFormQuestion(question)) {
+    if (isRecentFormQuestion(question) && mentionedCricketTeams(question).length > 0) {
       return `${errorNote}${await answerRecentFormQuestion(messages)}`;
     }
 
     if (/(current|live|today|match|matches|score)/i.test(question) && !/(likely|predict|prediction|win)/i.test(question)) {
-      const matches = await getCurrentMatches(0);
+      const matches = selectCricketMatches((await getMatchWindow()).matches, question);
       if (!matches.length) {
         return `${errorNote}${await webAnswerOrNotFound(messages)}`;
       }
@@ -1120,11 +946,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const primaryResearchAnswer = await runSportsResearchAgent(messages, todayIsoDate()).catch(
-      () => null
-    );
-    if (primaryResearchAnswer) {
-      return textResponse(primaryResearchAnswer);
+    const verifiedSnapshot = getVerifiedSportsSnapshot(question);
+    if (verifiedSnapshot) {
+      return textResponse(verifiedSnapshot);
     }
 
     if (isTournamentHistoryQuestion(question)) {
@@ -1159,8 +983,19 @@ export async function POST(request: Request) {
       return textResponse(await answerPlayerStatsQuestion(messages));
     }
 
-    if (isRecentFormQuestion(question)) {
+    if (isRecentFormQuestion(question) && mentionedCricketTeams(question).length > 0) {
       return textResponse(await answerRecentFormQuestion(messages));
+    }
+
+    if (/\b(matches?|scores?|results?|fixtures?|upcoming|future|live|scoreboard)\b/i.test(question) && !/predict|likely|squad|scorecard/i.test(question)) {
+      return textResponse(isFootballQuestion(question) ? await answerFootballQuestion(messages) : await answerTeamMatchLookup(messages));
+    }
+
+    const primaryResearchAnswer = await runSportsResearchAgent(messages, todayIsoDate()).catch(
+      () => null
+    );
+    if (primaryResearchAnswer) {
+      return textResponse(primaryResearchAnswer);
     }
   } catch (error) {
     return textResponse(await webAnswerOrNotFound(messages));
@@ -1173,7 +1008,7 @@ export async function POST(request: Request) {
   try {
     const result = streamText({
       model: google(GEMINI_MODEL),
-      system: SYSTEM_PROMPT,
+      system: `${SYSTEM_PROMPT}\nCurrent local date: ${todayIsoDate()} (Asia/Kolkata). Verify current information using fresh data. Never use a previous conversation answer as evidence for today. Distinguish live, scheduled, and completed matches; a score alone does not mean a match is complete.`,
       messages,
       maxSteps: 4,
       tools: {

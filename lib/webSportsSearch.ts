@@ -31,7 +31,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const KEYLESS_REQUEST_TIMEOUT_MS = 15_000;
 const ARTICLE_REQUEST_TIMEOUT_MS = 8_000;
 const MAX_ARTICLE_CHARACTERS = 1_200_000;
-const WEB_CACHE_TTL_MS = 10 * 60_000;
+const WEB_CACHE_TTL_MS = 45_000;
 const webCache = new Map<string, { expiresAt: number; value: string | null }>();
 
 export type SportsWebSearchOptions = {
@@ -109,6 +109,7 @@ type KeylessResult = {
   title: string;
   description: string;
   url: string;
+  publishedAt: string | undefined;
 };
 
 function keylessSearchSuffix(sport: string, intent?: string): string {
@@ -228,7 +229,7 @@ function parseRssItems(xml: string): KeylessResult[] {
       const title = xmlValue(match[1], "title");
       const description = xmlValue(match[1], "description");
       const url = safeWebUrl(xmlValue(match[1], "link"));
-      return { title, description, url };
+      return { title, description, url, publishedAt: xmlValue(match[1], "pubDate") || undefined };
     })
     .filter(
       (item): item is KeylessResult =>
@@ -278,6 +279,8 @@ function rankKeylessResults(
     "team"
   ]);
   const namedTerms = terms.filter((term) => !genericSportsTerms.has(term));
+  const containsTerm = (text: string, term: string): boolean =>
+    new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text);
 
   return items
     .map((item) => {
@@ -297,7 +300,10 @@ function rankKeylessResults(
           searchable
         );
       const missesNamedSubject =
-        namedTerms.length > 0 && !namedTerms.some((term) => searchable.includes(term));
+        namedTerms.length > 0 && !namedTerms.some((term) => containsTerm(searchable, term));
+      const wrongGender =
+        !/\b(women|women's|womens|female)\b/i.test(question) &&
+        /\b(women|women's|womens|female)\b/i.test(searchable);
       const resultBonus = /\b(beat|defeat|defeated|draw|won|wins|result|score)\b/i.test(item.title) ? 2 : 0;
       const previewPenalty =
         /\b(predicted|prediction|preview|playing xi|live streaming|how to watch)\b/i.test(item.title) ? 3 : 0;
@@ -319,6 +325,7 @@ function rankKeylessResults(
           isFootballCrossSportResult ||
           missesFootballContext ||
           missesNamedSubject ||
+          wrongGender ||
           rejectsPreview
             ? -100
             : terms.filter((term) => searchable.includes(term)).length +
@@ -468,7 +475,7 @@ function evidenceTerms(question: string): string[] {
 function bestEvidenceSentence(text: string, question: string): string {
   const terms = evidenceTerms(question);
   const noise =
-    /\b(cookie|privacy policy|sign up|subscribe|advertisement|javascript|all rights reserved)\b/i;
+    /\b(cookie|privacy policy|sign up|subscribe|advertisement|javascript|all rights reserved|comprehensive, up-to-date news coverage|aggregated from sources)\b/i;
 
   return text
     .split(/(?<=[.!?])\s+/)
@@ -568,7 +575,7 @@ async function searchKeylessWeb(
         ? "cricket"
         : "sports");
   const suffix = keylessSearchSuffix(sportSuffix, options.intent);
-  const query = /\b(today|yesterday|tomorrow)\b/i.test(question)
+  const query = /\b(today|yesterday|tomorrow|latest|current|live|recent|next|upcoming|future|fixtures?|performance)\b/i.test(question)
     ? `${focusedQuestion} current date ${referenceDate} ${suffix}`
     : `${focusedQuestion} ${suffix}`;
   const controller = new AbortController();
@@ -592,7 +599,15 @@ async function searchKeylessWeb(
       }
 
       const items = rankKeylessResults(
-        parseRssItems(await response.text()),
+        parseRssItems(await response.text()).filter((item) => {
+          // Undated or old news cannot establish what is happening now.
+          const timeSensitive = /\b(today|yesterday|tomorrow|latest|current|live|recent|next|upcoming|future|fixtures?|performance)\b/i.test(question);
+          if (!timeSensitive || explicitDate) return true;
+          const published = Date.parse(item.publishedAt ?? "");
+          const reference = Date.parse(`${referenceDate}T23:59:59Z`);
+          const days = /\b(today|live|current)\b/i.test(question) ? 2 : 30;
+          return Number.isFinite(published) && published <= reference && published >= reference - days * 86_400_000;
+        }),
         focusedQuestion,
         options.intent
       );
@@ -612,6 +627,8 @@ async function searchKeylessWeb(
         return synthesized;
       }
 
+      // News snippets cannot verify live status, final results or future fixtures.
+      if (/\b(today|yesterday|tomorrow|latest|current|live|recent|next|upcoming|future|fixtures?|performance)\b/i.test(question)) return null;
       return composeKeylessAnswer(question, options, items);
     }
 
@@ -681,6 +698,7 @@ Rules:
 - If the question is ambiguous because many matches occurred, say so and list up to five prominent completed football or cricket matches from that date, then ask the user to name the team or tournament.
 - State the two teams, winner or draw/no-result, score/result margin when verified, competition, and date.
 - For historical questions, provide the exact requested result or fact and its date when verified.
+- For current, latest, or recent questions, verify information as of the current local date; do not pass off old articles as current. Upcoming fixtures must be in the future. Live scores require current match-status evidence, and completed results require a final status. Previous conversation answers are not evidence.
 - Do not guess. If reliable search results do not identify the answer, reply: "I could not find verified data for that question. Please add the sport, team, competition, and date."
 - Keep the answer concise, use at most five matches or list items, and always finish the final sentence. Do not discuss the implementation or API failure.
 - Include no separate sources section because SportBot will append the grounding sources.`
@@ -723,7 +741,7 @@ Rules:
 
     const sources = uniqueSources(candidate?.groundingMetadata?.groundingChunks ?? []);
     if (!sources.length) {
-      return remember(answer);
+      return remember(await searchKeylessWeb(messages, referenceDate, options, apiKey));
     }
 
     return remember([

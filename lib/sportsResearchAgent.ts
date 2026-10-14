@@ -29,7 +29,7 @@ type WorkerResult = {
   score: number;
 };
 
-const RESEARCH_CACHE_TTL_MS = 10 * 60_000;
+const RESEARCH_CACHE_TTL_MS = 45_000;
 const researchCache = new Map<string, { expiresAt: number; value: string | null }>();
 
 const CRICKET_TERMS =
@@ -60,7 +60,7 @@ function detectIntent(question: string): ResearchIntent {
   if (/\b(recent form|recent matches|last matches|recent results|performance)\b/i.test(question)) {
     return "recent-form";
   }
-  if (/\b(next|upcoming|schedule|fixture)\b/i.test(question)) {
+  if (/\b(next|upcoming|future|tomorrow|schedule|fixtures?)\b/i.test(question)) {
     return "fixtures";
   }
   if (/\b(player|players|squad|roster|career|stats|statistics|records)\b/i.test(question)) {
@@ -156,8 +156,19 @@ function verifyWorkerAnswer(
     !/\b(formed|founded|established|major achievements?|titles?|champions?|national team)\b/i.test(
       answer
     );
+  const isGenericSearchPage =
+    /\bcomprehensive, up-to-date news coverage, aggregated from sources\b/i.test(answer);
+  const hasWrongGender =
+    !/\b(women|women's|womens|female)\b/i.test(question) &&
+    /\b(women|women's|womens|female)\b/i.test(answer);
 
-  if (wrongSport || !hasResultEvidence || isUnhelpfulTeamHistory) {
+  if (
+    wrongSport ||
+    !hasResultEvidence ||
+    isUnhelpfulTeamHistory ||
+    isGenericSearchPage ||
+    hasWrongGender
+  ) {
     return { sport, answer: null, score: 0 };
   }
 

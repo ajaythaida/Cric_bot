@@ -1,6 +1,10 @@
 "use client";
 
 const prompts = [
+  "Show live cricket matches",
+  "Show upcoming cricket matches",
+  "Show recent cricket results",
+  "Show live football matches",
   "Show India recent form",
   "🏏 India cricket team and players",
   "🏏 Virat Kohli recent performance",
